@@ -85,12 +85,6 @@ void app_error(char *msg);
 typedef void handler_t(int);
 handler_t *Signal(int signum, handler_t *handler);
 
-/* TEST WORK */
-void info_sigint_handler(int, siginfo_t *, void *);
-void info_sigtstp_handler(int, siginfo_t *, void *);
-typedef void info_handler_t(int, siginfo_t *, void *);
-info_handler_t * InfoSignal(int signum, info_handler_t * handler);
-/* END TEST */
 
 /*
  * main - The shell's main routine 
@@ -124,13 +118,9 @@ int main(int argc, char **argv) {
     /* Install the signal handlers */
 
     /* These are the ones you will need to implement */
-    //Signal(SIGINT,  sigint_handler);   /* ctrl-c */
-    //Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
+    Signal(SIGINT,  sigint_handler);   /* ctrl-c */
+    Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
     Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */
-	/* TEST WORK */
-	InfoSignal(SIGINT, info_sigint_handler);	/* ctrl-c */
-	InfoSignal(SIGTSTP, info_sigtstp_handler);	/* ctrl-z */
-	/* END TEST */
 
     /* This one provides a clean way to kill the shell */
     Signal(SIGQUIT, sigquit_handler); 
@@ -449,67 +439,6 @@ void sigtstp_handler(int sig) {
 }
 
 
-/* TEST WORK */
-/*
- * ctrl-c
- */
-void info_sigint_handler(int signum, siginfo_t *info, void *vp) {
-	pid_t pid = fgpid(jobs);
-	printf("Job [%i] (%i) terminated by signal %i\n", pid2jid(pid), pid, SIGINT);
-	kill(pid * -1, SIGINT);
-
-	/*
-	if (info->si_code != SI_USER) {
-		printf("\t\t\t\t\t\tBAM!!!!\n");
-		exit(0);
-	}
-	if (!info->si_uid) {
-		printf("\t\t\t\t\t\tReal user ID: %i\n", info->si_uid);
-		exit(0);
-	}
-	*/
-}
-
-/*
- * ctrl-z
- */
-void info_sigtstp_handler(int signum, siginfo_t *info, void *vp) {
-	pid_t pid = fgpid(jobs);
-
-	struct job_t *job = getjobpid(jobs, pid);
-	job->state = ST;
-
-	kill(pid * -1, SIGTSTP);
-	printf("Job [%i] (%i) stopped by signal %i\n", pid2jid(pid), pid, SIGTSTP);
-
-	/*
-	if (info->si_code != SI_USER) {
-		printf("\t\t\t\t\t\tBAM!!!!\n");
-		exit(0);
-	}
-	if (!info->si_uid) {
-		printf("\t\t\t\t\t\tReal user ID: %i\n", info->si_uid);
-		exit(0);
-	}
-	*/
-}
-
-/*
- * InfoSignal - wrapper for the sigaction function using sa_sigaction
- * for the handler instead of sa_handler
- */
-info_handler_t * InfoSignal(int signum, info_handler_t * handler) {
-    struct sigaction action, old_action;
-
-    action.sa_sigaction = handler;  
-    sigemptyset(&action.sa_mask); /* block sigs of type being handled */
-    action.sa_flags = SA_RESTART | SA_SIGINFO; /* restart syscalls if possible */
-
-    if (sigaction(signum, &action, &old_action) < 0)
-		unix_error("Signal error");
-    return (old_action.sa_sigaction);
-}
-/* END TEST */
 
 
 /*********************
