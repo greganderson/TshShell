@@ -413,7 +413,7 @@ void do_bgfg(char **argv) {
 void waitfg(pid_t pid) {
 	/* Busy loop until pid is no longer the fg process */
 	while (fgpid(jobs) == pid)
-		sleep(0);
+		sleep(1);
 
 	/* Beats me why this return statement is so important, but it fails without it */
 	return;
