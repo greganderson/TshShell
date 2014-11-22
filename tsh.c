@@ -306,11 +306,15 @@ int parseline(const char *cmdline, char **argv) {
  *    it immediately.  
  */
 int builtin_cmd(char **argv) {
+	/* Get number of args */
 	int argc = 0;
 	int i = 0;
 
 	while (argv[i++] != NULL)
 		++argc;
+
+
+	/* quit and jobs */
 
 	if (!strcmp(argv[0], "quit"))
 		exit(0);
@@ -357,12 +361,17 @@ int builtin_cmd(char **argv) {
 void do_bgfg(char **argv) {
 	pid_t pid;
 	struct job_t *job;
+
+	/* Used for stripping the % */
 	int len = strlen(argv[1]);
 	char jid[len-1];
 
+	/* Using a job id */
 	if ((argv[1])[0] == '%') {
+		/* Strip the % */
 		memcpy(jid, &((argv[1])[1]), len-1);
 		jid[len-1] = '\0';
+
 		job = getjobjid(jobs, atoi(jid));
 
 		if (job == NULL) {
@@ -370,6 +379,7 @@ void do_bgfg(char **argv) {
 			return;
 		}
 	}
+	/* Using a pid */
 	else {
 		job = getjobpid(jobs, atoi(argv[1]));
 
@@ -382,19 +392,18 @@ void do_bgfg(char **argv) {
 
 	pid = job->pid;
 
-	/* fg */
-	if (strcmp(argv[0], "fg") == 0) {
-		job->state = FG;
-		kill(pid * -1, SIGCONT);
-		waitfg(pid);
-	}
+	/* Set the state for the job */
+	int state;
+	state = strcmp(argv[0], "fg") == 0 ? FG : BG;
+	job->state = state;
 
-	/* bg */
-	else {
-		job->state = BG;
-		kill(pid * -1, SIGCONT);
+	kill(pid * -1, SIGCONT);
+
+	if (state == FG)
+		waitfg(pid);
+	else
 		printf("[%i] (%i) %s", job->jid, job->pid, job->cmdline);
-	}
+		
     return;
 }
 
@@ -402,8 +411,11 @@ void do_bgfg(char **argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid) {
+	/* Busy loop until pid is no longer the fg process */
 	while (fgpid(jobs) == pid)
 		sleep(0);
+
+	/* Beats me why this return statement is so important, but it fails without it */
 	return;
 }
 
@@ -422,15 +434,16 @@ void sigchld_handler(int sig) {
 	pid_t pid;
 	int status;
 
+	/* Reap some zombies */
 	while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
 
-		// ctrl-c
+		/* ctrl-c */
 		if (WIFSIGNALED(status)) {
 			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
 			deletejob(jobs, pid);
 		}
 
-		// ctrl-z
+		/* ctrl-z */
 		else if (WIFSTOPPED(status)) {
 			printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
 			getjobpid(jobs, pid)->state = ST;
