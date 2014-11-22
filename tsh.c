@@ -168,43 +168,79 @@ void eval(char *cmdline) {
 	char buf[MAXLINE];
 	int bg;
 	pid_t pid;
-	sigset_t x;
+	sigset_t x;	/* Signal set used to block appropriate signals while adding children to jobs */
 
 	strcpy(buf, cmdline);
 	bg = parseline(buf, argv);
 	if (argv[0] == NULL)
 		return;
 
+	/* Check if built in command, run immediately if it is */
 	if (!builtin_cmd(argv)) {
 		
-		/* Block child signal to prevent race condition */
-		sigemptyset(&x);
-		sigaddset(&x, SIGCHLD);
-		sigprocmask(SIG_BLOCK, &x, NULL);
+		/* Block signals to prevent race condition */
+		if (sigemptyset(&x)) {
+			printf("Error on sigemptyset\n");
+			exit(1);
+		}
+		if (sigaddset(&x, SIGCHLD)) {
+			printf("Error on sigaddset\n");
+			exit(1);
+		}
+		if (sigaddset(&x, SIGINT)) {
+			printf("Error on sigaddset\n");
+			exit(1);
+		}
+		if (sigaddset(&x, SIGTSTP)) {
+			printf("Error on sigaddset\n");
+			exit(1);
+		}
+		if (sigprocmask(SIG_BLOCK, &x, NULL)) {
+			printf("Error on sigprocmask\n");
+			exit(1);
+		}
 
+		/* Create child process */
 		if ((pid = fork()) == 0) {
-			sigprocmask(SIG_UNBLOCK, &x, NULL);
-			setpgid(0, 0);
+
+			/* Child process inherits the blocked signals, so unblock before continuing */
+			if (sigprocmask(SIG_UNBLOCK, &x, NULL)) {
+				printf("Error on sigprocmask\n");
+				exit(1);
+			}
+
+			/* Set unique process group id */
+			if (setpgid(0, 0)) {
+				printf("Error on setpgid\n");
+				exit(1);
+			}
+
+			/* Execute the desired command, exiting child process if error */
 			if (execve(argv[0], argv, environ) < 0) {
 				printf("%s: Command not found\n", argv[0]);
 				exit(0);
 			}
 		}
 
+		/* Set the state for the job */
+		int state;
+		state = bg ? BG : FG;
+
+		if (!addjob(jobs, pid, state, cmdline)) {
+			printf("Error on addjob\n");
+			exit(1);
+		}
+		if (sigprocmask(SIG_UNBLOCK, &x, NULL)) {
+			printf("Error on sigprocmask\n");
+			exit(1);
+		}
 
 		/* Foreground process */
-		if (!bg) {
-			addjob(jobs, pid, FG, cmdline);
-			sigprocmask(SIG_UNBLOCK, &x, NULL);
+		if (!bg)
 			waitfg(pid);
-		}
-
 		/* Background process */
-		else {
-			addjob(jobs, pid, BG, cmdline);
-			sigprocmask(SIG_UNBLOCK, &x, NULL);
+		else
 			printf("[%i] (%d) %s", pid2jid(pid), pid, cmdline);
-		}
 	}
     return;
 }
@@ -299,7 +335,6 @@ int builtin_cmd(char **argv) {
 		while (*s) {
 			if (*s == '%') {
 				++s;
-				//printf("\t\t\t\t\t\tGot here\n");
 				continue;
 			}
 			if (!isdigit(*s)) {
@@ -312,12 +347,6 @@ int builtin_cmd(char **argv) {
 		do_bgfg(argv);
 		return 1;
 	}
-	/*
-	if (!strcmp(argv[0], "bg")) {
-		do_bgfg(argv);
-		return 1;
-	}
-	*/
 
 	return 0;     /* not a builtin command */
 }
@@ -374,7 +403,7 @@ void do_bgfg(char **argv) {
  */
 void waitfg(pid_t pid) {
 	while (fgpid(jobs) == pid)
-		sleep(1);
+		sleep(0);
 	return;
 }
 
@@ -397,12 +426,14 @@ void sigchld_handler(int sig) {
 
 		// ctrl-c
 		if (WIFSIGNALED(status)) {
+			printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
 			deletejob(jobs, pid);
 		}
 
 		// ctrl-z
 		else if (WIFSTOPPED(status)) {
-			//deletejob(jobs, pid);
+			printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+			getjobpid(jobs, pid)->state = ST;
 		}
 
 		else {
@@ -419,8 +450,10 @@ void sigchld_handler(int sig) {
  */
 void sigint_handler(int sig) {
 	pid_t pid = fgpid(jobs);
-	printf("Job [%i] (%i) terminated by signal %i\n", pid2jid(pid), pid, SIGINT);
-	kill(pid * -1, SIGINT);
+
+	if (pid)
+		kill(pid * -1, sig);
+	return;
 }
 
 /*
@@ -431,13 +464,10 @@ void sigint_handler(int sig) {
 void sigtstp_handler(int sig) {
 	pid_t pid = fgpid(jobs);
 
-	struct job_t *job = getjobpid(jobs, pid);
-	job->state = ST;
-
-	kill(pid * -1, SIGTSTP);
-	printf("Job [%i] (%i) stopped by signal %i\n", pid2jid(pid), pid, SIGTSTP);
+	if (pid)
+		kill(pid * -1, sig);
+	return;
 }
-
 
 
 
