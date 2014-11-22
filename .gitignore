@@ -1,1 +1,4 @@
 tsh
+*.swp
+results/
+.fuse*
